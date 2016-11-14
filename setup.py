@@ -43,8 +43,13 @@ extra_opts = {
     'tests_require': ['pytest', 'responses', 'mock']
 }
 
+
 if sys.version_info[0] != 3:
     extra_opts['setup_requires'].append('flake8<=2.6.2')
+
+# Remove flake requirement for versions less than python3
+# if sys.version_info[0] != 3:
+#     extra_opts['setup_requires'].append('flake8')
 
 setup(
     name='twitter-ads',
