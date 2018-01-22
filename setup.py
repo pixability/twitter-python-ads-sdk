@@ -43,6 +43,7 @@ extra_opts = {
     'tests_require': ['pytest', 'responses', 'mock']
 }
 
+# Modify the flake8 requirement
 if sys.version_info[0] != 3:
     extra_opts['setup_requires'].append('flake8<=2.6.2')
 
