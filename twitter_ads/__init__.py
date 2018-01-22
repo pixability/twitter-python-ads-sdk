@@ -1,6 +1,7 @@
 # Copyright (C) 2015 Twitter, Inc.
 
-VERSION = (0, 2, 2, '-pix')
+VERSION = (2, 0, 1, '-pix')
+API_VERSION = '2'
 
 from twitter_ads.utils import get_version
 

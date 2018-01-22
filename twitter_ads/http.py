@@ -7,21 +7,19 @@ import sys
 import platform
 import logging
 import json
+import zlib
 
-try:
-    import httplib2 as httplib
-except ImportError:
-    if sys.version_info[0] != 3:
-        import httplib
-    else:
-        import http.client as httplib
+if sys.version_info[0] != 3:
+    import httplib
+else:
+    import http.client as httplib
 
 import dateutil.parser
 from datetime import datetime, timedelta
 
 from requests_oauthlib import OAuth1Session
 
-from twitter_ads.utils import get_version, http_time
+from twitter_ads.utils import get_version, http_time, size
 from twitter_ads.error import Error
 
 
@@ -82,6 +80,7 @@ class Request(object):
         params = self.options.get('params', None)
         data = self.options.get('body', None)
         files = self.options.get('files', None)
+        stream = self.options.get('stream', False)
 
         consumer = OAuth1Session(
             self._client.consumer_key,
@@ -91,10 +90,14 @@ class Request(object):
 
         url = self.__domain() + self._resource
         method = getattr(consumer, self._method)
-        response = method(url, headers=headers, data=data, params=params, files=files)
+
+        response = method(url, headers=headers, data=data, params=params,
+                          files=files, stream=stream)
+
+        raw_response_body = response.raw.read() if stream else response.text
 
         return Response(response.status_code, response.headers,
-                        body=response.raw, raw_body=response.text)
+                        body=response.raw, raw_body=raw_response_body)
 
     def __enable_logging(self):
         httplib.HTTPConnection.debuglevel = 1
@@ -123,10 +126,21 @@ class Response(object):
         self._headers = headers
         self._raw_body = kwargs.get('raw_body', None)
 
+        if headers.get('content-type') == 'application/gzip':
+            # hack because Twitter TON API doesn't return headers as it should
+            # and instead returns a gzipp'd file rather than a gzipp encoded response
+            # Content-Encoding: gzip
+            # Content-Type: application/json
+            # instead it returns:
+            # Content-Type: application/gzip
+            raw_response_body = zlib.decompress(self._raw_body, 16 + zlib.MAX_WBITS).decode()
+        else:
+            raw_response_body = self._raw_body
+
         try:
-            self._body = json.loads(self._raw_body)
+            self._body = json.loads(raw_response_body)
         except ValueError:
-            self._body = self._raw_body
+            self._body = raw_response_body
 
         if 'x-rate-limit-reset' in headers:
             self._rate_limit = int(headers['x-rate-limit-limit'])
@@ -181,7 +195,9 @@ class TONUpload(object):
     _DEFAULT_RESOURCE = '/1.1/ton/bucket/'
     _DEFAULT_BUCKET = 'ta_partner'
     _DEFAULT_EXPIRE = datetime.now() + timedelta(days=10)
-    _MIN_FILE_SIZE = 1024 * 1024 * 1
+    _DEFAULT_CHUNK_SIZE = 64
+    _SINGLE_UPLOAD_MAX = 1024 * 1024 * _DEFAULT_CHUNK_SIZE
+    _RESPONSE_TIME_MAX = 5000
 
     def __init__(self, client, file_path, **kwargs):
         if not os.path.isfile(file_path):
@@ -226,13 +242,14 @@ class TONUpload(object):
     def perform(self):
         """Executes the current TONUpload object."""
 
-        if self._file_size < self._MIN_FILE_SIZE:
+        if self._file_size < self._SINGLE_UPLOAD_MAX:
             resource = "{0}{1}".format(self._DEFAULT_RESOURCE, self.bucket)
             response = self.__upload(resource, open(self._file_path, 'rb').read())
             return response.headers['location']
         else:
             response = self.__init_chunked_upload()
-            chunk_size = int(response.headers['x-ton-min-chunk-size'])
+            min_chunk_size = int(response.headers['x-ton-min-chunk-size'])
+            chunk_size = min_chunk_size * self._DEFAULT_CHUNK_SIZE
             location = response.headers['location']
 
             f = open(self._file_path, 'rb')
@@ -243,10 +260,14 @@ class TONUpload(object):
                     break
                 bytes_start = bytes_read
                 bytes_read += len(bytes)
-                self.__upload_chunk(location, chunk_size, bytes, bytes_start, bytes_read)
+                response = self.__upload_chunk(location, chunk_size, bytes, bytes_start, bytes_read)
+                response_time = int(response.headers['x-response-time'])
+                chunk_size = min_chunk_size * size(self._DEFAULT_CHUNK_SIZE,
+                                                   self._RESPONSE_TIME_MAX,
+                                                   response_time)
             f.close()
 
-            return location
+            return location.split("?")[0]
 
     def __repr__(self):
         return '<{name} object at {mem} bucket={bucket} file={file}>'.format(

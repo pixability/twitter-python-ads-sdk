@@ -4,26 +4,32 @@
 
 import dateutil.parser
 from datetime import datetime, timedelta
+try:
+    from urllib.parse import urlparse
+except ImportError:
+    from urlparse import urlparse
+import json
 
 from twitter_ads.utils import format_time, to_time
 from twitter_ads.enum import ENTITY, GRANULARITY, PLACEMENT, TRANSFORM
 from twitter_ads.http import Request
 from twitter_ads.cursor import Cursor
+from twitter_ads import API_VERSION
 
 
 def resource_property(klass, name, **kwargs):
-        """Builds a resource object property."""
-        klass.PROPERTIES[name] = kwargs
+    """Builds a resource object property."""
+    klass.PROPERTIES[name] = kwargs
 
-        def getter(self):
-            return getattr(self, '_%s' % name, kwargs.get('default', None))
+    def getter(self):
+        return getattr(self, '_%s' % name, kwargs.get('default', None))
 
-        if kwargs.get('readonly', False):
-            setattr(klass, name, property(getter))
-        else:
-            def setter(self, value):
-                setattr(self, '_%s' % name, value)
-            setattr(klass, name, property(getter, setter))
+    if kwargs.get('readonly', False):
+        setattr(klass, name, property(getter))
+    else:
+        def setter(self, value):
+            setattr(self, '_%s' % name, value)
+        setattr(klass, name, property(getter, setter))
 
 
 class Resource(object):
@@ -129,6 +135,50 @@ class Resource(object):
             return klass.load(self, id, **kwargs)
 
 
+class Batch(object):
+
+    _ENTITY_MAP = {
+        'LineItem': ENTITY.LINE_ITEM,
+        'Campaign': ENTITY.CAMPAIGN,
+        'TargetingCriteria': ENTITY.TARGETING_CRITERION
+    }
+
+    @classmethod
+    def batch_save(klass, account, objs):
+        """
+        Makes batch request(s) for a passed in list of objects
+        """
+
+        resource = klass.BATCH_RESOURCE_COLLECTION.format(account_id=account.id)
+
+        json_body = []
+
+        for obj in objs:
+            entity_type = klass._ENTITY_MAP[klass.__name__].lower()
+            obj_json = {'params': obj.to_params()}
+
+            if obj.id is None:
+                obj_json['operation_type'] = 'Create'
+            elif obj.to_delete is True:
+                obj_json['operation_type'] = 'Delete'
+                obj_json['params'][entity_type + '_id'] = obj.id
+            else:
+                obj_json['operation_type'] = 'Update'
+                obj_json['params'][entity_type + '_id'] = obj.id
+
+            json_body.append(obj_json)
+
+        resource = klass.BATCH_RESOURCE_COLLECTION.format(account_id=account.id)
+        response = Request(account.client,
+                           'post', resource,
+                           body=json.dumps(json_body),
+                           headers={'Content-Type': 'application/json'}).perform()
+
+        # persist each entity
+        for obj, res_obj in zip(objs, response.body['data']):
+            obj = obj.from_response(res_obj)
+
+
 class Persistence(object):
     """
     Container for all persistence related logic used by API resource objects.
@@ -166,14 +216,15 @@ class Analytics(object):
     """
     Container for all analytics related logic used by API resource objects.
     """
-
     ANALYTICS_MAP = {
+        'Campaign': ENTITY.CAMPAIGN,
         'LineItem': ENTITY.LINE_ITEM,
         'OrganicTweet': ENTITY.ORGANIC_TWEET,
         'PromotedTweet': ENTITY.PROMOTED_TWEET
     }
 
-    RESOURCE_SYNC = '/1/stats/accounts/{account_id}'
+    RESOURCE_SYNC = '/' + API_VERSION + '/stats/accounts/{account_id}'
+    RESOURCE_ASYNC = '/' + API_VERSION + '/stats/jobs/accounts/{account_id}'
 
     def stats(self, metrics, **kwargs):  # noqa
         """
@@ -182,9 +233,9 @@ class Analytics(object):
         return self.__class__.all_stats(self.account, [self.id], metrics, **kwargs)
 
     @classmethod
-    def all_stats(klass, account, ids, metric_groups, **kwargs):
+    def _standard_params(klass, ids, metric_groups, **kwargs):
         """
-        Pulls a list of metrics for a specified set of object IDs.
+        Sets the standard params for a stats request
         """
         end_time = kwargs.get('end_time', datetime.utcnow())
         start_time = kwargs.get('start_time', end_time - timedelta(seconds=604800))
@@ -202,6 +253,57 @@ class Analytics(object):
 
         params['entity_ids'] = ','.join(ids)
 
+        return params
+
+    @classmethod
+    def all_stats(klass, account, ids, metric_groups, **kwargs):
+        """
+        Pulls a list of metrics for a specified set of object IDs.
+        """
+        params = klass._standard_params(ids, metric_groups, **kwargs)
+
         resource = klass.RESOURCE_SYNC.format(account_id=account.id)
         response = Request(account.client, 'get', resource, params=params).perform()
         return response.body['data']
+
+    @classmethod
+    def queue_async_stats_job(klass, account, ids, metric_groups, **kwargs):
+        """
+        Queues a list of metrics for a specified set of object IDs asynchronously
+        """
+        params = klass._standard_params(ids, metric_groups, **kwargs)
+
+        params['platform'] = kwargs.get('platform', None)
+        params['country'] = kwargs.get('country', None)
+        params['segmentation_type'] = kwargs.get('segmentation_type', None)
+
+        resource = klass.RESOURCE_ASYNC.format(account_id=account.id)
+        response = Request(account.client, 'post', resource, params=params).perform()
+        return response.body['data']
+
+    @classmethod
+    def async_stats_job_result(klass, account, job_id, **kwargs):
+        """
+        Returns the results of the specified async job IDs
+        """
+        params = {
+            'job_ids': job_id
+        }
+
+        resource = klass.RESOURCE_ASYNC.format(account_id=account.id)
+        response = Request(account.client, 'get', resource, params=params).perform()
+
+        return response.body['data'][0]
+
+    @classmethod
+    def async_stats_job_data(klass, account, url, **kwargs):
+        """
+        Returns the results of the specified async job IDs
+        """
+        resource = urlparse(url)
+        domain = '{0}://{1}'.format(resource.scheme, resource.netloc)
+
+        response = Request(account.client, 'get', resource.path, domain=domain,
+                           raw_body=True, stream=True).perform()
+
+        return response.body

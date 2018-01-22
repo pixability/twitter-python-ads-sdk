@@ -15,6 +15,7 @@ def get_version(version_tuple):
         return '.'.join(map(str, version_tuple[:-1])) + version_tuple[-1]
     return '.'.join(map(str, version_tuple))
 
+
 init = os.path.join(os.path.dirname(__file__), 'twitter_ads', '__init__.py')
 version_line = list(filter(lambda l: l.startswith('VERSION'), open(init)))[0]
 
@@ -28,7 +29,6 @@ CLASSIFIERS = [
     'Programming Language :: Python',
     'Programming Language :: Python :: 2.7',
     'Programming Language :: Python :: 3',
-    'Programming Language :: Python :: 3.2',
     'Programming Language :: Python :: 3.3',
     'Programming Language :: Python :: 3.4',
     'Programming Language :: Python :: Implementation :: CPython',
@@ -47,11 +47,16 @@ extra_opts = {
 if sys.version_info[0] != 3:
     extra_opts['setup_requires'].append('flake8<=2.6.2')
 
+# Remove flake requirement for versions less than python3
+# if sys.version_info[0] != 3:
+#     extra_opts['setup_requires'].append('flake8')
+
+
 setup(
     name='twitter-ads',
     version=VERSION,
-    author='Brandon Black',
-    author_email='bblack@twitter.com',
+    author='Brandon Black, Jacob Petrie',
+    author_email='bblack@twitter.com, jpetrie@twitter.com',
     url=URL,
     download_url=DOWNLOAD_URL,
     license='MIT',

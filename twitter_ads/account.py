@@ -3,16 +3,17 @@
 """
 A Twitter supported and maintained Ads API SDK for Python.
 """
-
 from twitter_ads.enum import TRANSFORM
 from twitter_ads.http import Request
 from twitter_ads.cursor import Cursor
+from twitter_ads import API_VERSION
 
 from twitter_ads.resource import resource_property, Resource
-from twitter_ads.creative import Video
+from twitter_ads.creative import (AccountMedia, MediaCreative, ScheduledTweet,
+                                  Video, VideoWebsiteCard)
 from twitter_ads.audience import TailoredAudience
-from twitter_ads.campaign import (FundingInstrument, Campaign, LineItem,
-                                  AppList, PromotableUser)
+from twitter_ads.campaign import (AppList, Campaign, FundingInstrument, LineItem,
+                                  PromotableUser, ScheduledPromotedTweet)
 
 
 class Account(Resource):
@@ -23,10 +24,10 @@ class Account(Resource):
 
     PROPERTIES = {}
 
-    RESOURCE_COLLECTION = '/1/accounts'
-    RESOURCE = '/1/accounts/{id}'
-    FEATURES = '/1/accounts/{id}/features'
-    SCOPED_TIMELINE = '/1/accounts/{id}/scoped_timeline'
+    RESOURCE_COLLECTION = '/' + API_VERSION + '/accounts'
+    RESOURCE = '/' + API_VERSION + '/accounts/{id}'
+    FEATURES = '/' + API_VERSION + '/accounts/{id}/features'
+    SCOPED_TIMELINE = '/' + API_VERSION + '/accounts/{id}/scoped_timeline'
 
     def __init__(self, client):
         self._client = client
@@ -124,6 +125,36 @@ class Account(Resource):
         """
         return self._load_resource(Video, id, **kwargs)
 
+    def account_media(self, id=None, **kwargs):
+        """
+        Returns a collection of account media available to the current account.
+        """
+        return self._load_resource(AccountMedia, id, **kwargs)
+
+    def media_creatives(self, id=None, **kwargs):
+        """
+        Returns a collection of media creatives available to the current account.
+        """
+        return self._load_resource(MediaCreative, id, **kwargs)
+
+    def scheduled_tweets(self, id=None, **kwargs):
+        """
+        Returns a collection of Scheduled Tweets available to the current account.
+        """
+        return self._load_resource(ScheduledTweet, id, **kwargs)
+
+    def scheduled_promoted_tweets(self, id=None, **kwargs):
+        """
+        Returns a collection of Scheduled Promoted Tweets available to the current account.
+        """
+        return self._load_resource(ScheduledPromotedTweet, id, **kwargs)
+
+    def video_website_cards(self, id=None, **kwargs):
+        """
+        Returns a collection of video website cards available to the current account.
+        """
+        return self._load_resource(VideoWebsiteCard, id, **kwargs)
+
     def scoped_timeline(self, *id, **kwargs):
         """
         Returns the most recent promotable Tweets created by the specified Twitter user.
@@ -138,11 +169,13 @@ class Account(Resource):
 
         return response.body['data']
 
+
 # account properties
 resource_property(Account, 'id', readonly=True)
 resource_property(Account, 'name', readonly=True)
 resource_property(Account, 'salt', readonly=True)
 resource_property(Account, 'timezone', readonly=True)
+resource_property(Account, 'approval_status', readonly=True)
 resource_property(Account, 'deleted', readonly=True, transform=TRANSFORM.BOOL)
 resource_property(Account, 'timezone_switch_at', readonly=True, transform=TRANSFORM.TIME)
 resource_property(Account, 'created_at', readonly=True, transform=TRANSFORM.TIME)
